@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
+#include <ATen/Context.h>
 #include <cuda_runtime.h>
 
 int correlation_forward_cuda_kernel(at::Tensor& output,
