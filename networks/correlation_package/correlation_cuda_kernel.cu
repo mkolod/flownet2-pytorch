@@ -208,8 +208,10 @@ __global__ void correlation_backward_input1(int item, scalar_t* gradInput1, int 
 
     scalar_t nelems = kernel_size * kernel_size * nInputChannels;
 
-    __shared__ scalar_t prod_sum[THREADS_PER_BLOCK];
-    prod_sum[tch_off] = 0;
+//    __shared__ float prod_sum[THREADS_PER_BLOCK];
+//    prod_sum[tch_off] = 0;
+
+    float prod_local_sum = 0.0f;
 
     for (int tc = tch_off; tc < nOutputChannels; tc += THREADS_PER_BLOCK) {
 
@@ -218,24 +220,37 @@ __global__ void correlation_backward_input1(int item, scalar_t* gradInput1, int 
 
       int indx2 = n * pdimyxc + (y + j2)* pdimxc + (x + i2) * pdimc + c;
       
-      scalar_t val2 = rInput2[indx2];
+      float val2 = static_cast<float>(rInput2[indx2]);
 
       for (int j = ymin; j <= ymax; ++j) {
         for (int i = xmin; i <= xmax; ++i) {
           int tindx = n * tdimcyx + tc * tdimyx + j * tdimx + i;
-          prod_sum[tch_off] += gradOutput[tindx] * val2;
+          // new impl
+          prod_local_sum += static_cast<float>(gradOutput[tindx]) * val2;
+//          prod_sum[tch_off] += gradOutput[tindx] * val2;
         }
       }
     }
-    __syncthreads();
+
+//    prod_sum[tch_off] = local_sum;
+
+//    __syncthreads();
+
+     if (blockDim.x == warpSize) {
+         __syncwarp();
+         prod_local_sum = warpReduceSum(prod_local_sum);
+     } else {
+         __syncthreads();
+         prod_local_sum = blockReduceSum(prod_local_sum);
+     }
 
     if(tch_off == 0) {
-      scalar_t reduce_sum = 0;
-      for(int idx = 0; idx < THREADS_PER_BLOCK; idx++) {
-          reduce_sum += prod_sum[idx];
-      }
+//      scalar_t reduce_sum = 0;
+//      for(int idx = 0; idx < THREADS_PER_BLOCK; idx++) {
+//          reduce_sum += prod_sum[idx];
+//      }
       const int indx1 = n * odimcyx + c * odimyx + (y - pad_size) * odimx + (x - pad_size);
-      gradInput1[indx1] = reduce_sum / nelems;
+      gradInput1[indx1] = static_cast<scalar_t>(reduce_sum / nelems);
     }
 
 }
@@ -280,8 +295,8 @@ __global__ void correlation_backward_input2(int item, scalar_t*  gradInput2, int
 
     scalar_t nelems = kernel_size * kernel_size * nInputChannels;
 
-    __shared__ scalar_t prod_sum[THREADS_PER_BLOCK];
-    prod_sum[tch_off] = 0;
+    __shared__ float prod_sum[THREADS_PER_BLOCK];
+//    prod_sum[tch_off] = 0;
 
     for (int tc = tch_off; tc < nOutputChannels; tc += THREADS_PER_BLOCK) {
       int i2 = (tc % displacement_size - displacement_rad) * stride2;
@@ -310,15 +325,20 @@ __global__ void correlation_backward_input2(int item, scalar_t*  gradInput2, int
       ymax = min(outputHeight-1,ymax);
       
       int indx1 = n * pdimyxc + (y - j2)* pdimxc + (x - i2) * pdimc + c;
-      scalar_t val1 = rInput1[indx1];
+      float val1 = static_cast<float>(rInput1[indx1]);
+
+      float local_sum = 0.0f;
 
       for (int j = ymin; j <= ymax; ++j) {
         for (int i = xmin; i <= xmax; ++i) {
           int tindx = n * tdimcyx + tc * tdimyx + j * tdimx + i;
-          prod_sum[tch_off] += gradOutput[tindx] * val1;
+          local_sum += gradOutput[tindx] * val1;
+//          prod_sum[tch_off] += gradOutput[tindx] * val1;
         }
       }
     }
+
+    prod_sum[tch_off] = local_sum;
 
     __syncthreads();
 
