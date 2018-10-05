@@ -295,8 +295,10 @@ __global__ void correlation_backward_input2(int item, scalar_t*  gradInput2, int
 
     scalar_t nelems = kernel_size * kernel_size * nInputChannels;
 
-    __shared__ float prod_sum[THREADS_PER_BLOCK];
+//    __shared__ float prod_sum[THREADS_PER_BLOCK];
 //    prod_sum[tch_off] = 0;
+
+    float prod_local_sum = 0.0f;
 
     for (int tc = tch_off; tc < nOutputChannels; tc += THREADS_PER_BLOCK) {
       int i2 = (tc % displacement_size - displacement_rad) * stride2;
@@ -327,28 +329,39 @@ __global__ void correlation_backward_input2(int item, scalar_t*  gradInput2, int
       int indx1 = n * pdimyxc + (y - j2)* pdimxc + (x - i2) * pdimc + c;
       float val1 = static_cast<float>(rInput1[indx1]);
 
-      float local_sum = 0.0f;
+//      float local_sum = 0.0f;
 
       for (int j = ymin; j <= ymax; ++j) {
         for (int i = xmin; i <= xmax; ++i) {
           int tindx = n * tdimcyx + tc * tdimyx + j * tdimx + i;
-          local_sum += gradOutput[tindx] * val1;
+          prod_local_sum += gradOutput[tindx] * val1;
+//          local_sum += gradOutput[tindx] * val1;
 //          prod_sum[tch_off] += gradOutput[tindx] * val1;
         }
       }
     }
 
-    prod_sum[tch_off] = local_sum;
+//    prod_sum[tch_off] = local_sum;
 
-    __syncthreads();
+
+     if (blockDim.x == warpSize) {
+         __syncwarp();
+         prod_local_sum = warpReduceSum(prod_local_sum);
+     } else {
+         __syncthreads();
+         prod_local_sum = blockReduceSum(prod_local_sum);
+     }
+
+
+//    __syncthreads();
 
     if(tch_off == 0) {
-      scalar_t reduce_sum = 0;
-      for(int idx = 0; idx < THREADS_PER_BLOCK; idx++) {
-          reduce_sum += prod_sum[idx];
-      }
+//      scalar_t reduce_sum = 0;
+//      for(int idx = 0; idx < THREADS_PER_BLOCK; idx++) {
+//          reduce_sum += prod_sum[idx];
+//      }
       const int indx2 = n * odimcyx + c * odimyx + (y - pad_size) * odimx + (x - pad_size);
-      gradInput2[indx2] = reduce_sum / nelems;
+      gradInput2[indx2] = static_cast<scalar_t>(prod_local__sum / nelems);
     }
 
 }
